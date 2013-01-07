@@ -1,0 +1,31 @@
+Newsletters Module
+drop-in module for pyrocms
+author: Wesley Murch <wesley.murch@gmail.com>
+last update: 2010-03-03 18:00:00
+
+TO DO:
+
+	verify send newsletter
+	newsletter reports?
+	check that images are coming through
+
+	newsletter templates
+	clean up date storing and formatting
+	pagination
+	prevent orphaned recipients
+	merge groups - choose group to retain details
+	REPOPULATE CHECKBOXES
+	
+
+lastly...
+
+	clean and comment all code
+	move contoller stuff out of models
+	create sql with 2 default groups public|private
+	
+	FRONTEND:
+	fix subscribe form and error/success messages
+	fix groups situation on subscribe form
+	unsubscribe form
+	
+	

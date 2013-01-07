@@ -1,0 +1,68 @@
+<?php if (!defined('BASEPATH')) exit('No direct script access allowed');
+/**
+ * This is a Newsletter module for PyroCMS
+ *
+ * @author 		Kamal Lamichhane
+ * @website		http://lkamal.com.np
+ * @package 	PyroCMS
+ * @subpackage 	Newsletter
+ */
+class Recipient_m extends MY_Model {
+
+	public function __construct()
+	{		
+		parent::__construct();
+		
+		$this->_table = 'newsletter_recipients';
+        $this->primary_key = 'id';
+	}
+	
+	//create a new item
+	public function create($input)
+	{
+	    $group = $input['group'];
+
+	    unset($input['btnAction'], $input['group']);
+
+		if($this->db->insert($this->_table, $input)){
+		    $recipient_id = $this->db->insert_id();
+            return $this->_recipient_groups($recipient_id, $group);
+		}
+        else{
+            return FALSE;
+        }
+	}
+    
+    public function update($id, $input){
+        $group = $input['group'];
+
+        unset($input['btnAction'], $input['group']);
+
+        if(parent::update($id, $input)){
+            return $this->_recipient_groups($id, $group);
+        }
+        else{
+            return FALSE;
+        }
+    }
+    
+    /**
+     * Inserts recipients to groups
+     * 
+     * @access protected
+     * @param int $recipient_id
+     * @param array $groups posted from checkbox
+     */
+    protected function _recipient_groups($recipient_id, $groups){
+        $this->_table = 'newsletter_recipients_groups';
+        $this->db->delete($this->_table, array('recipient_id' => $recipient_id));
+        
+        $rg = array();
+        foreach($groups as $group){
+            $rg[] = array('recipient_id' => $recipient_id, 'group_id' => $group);
+        }
+        
+        return $this->db->insert_batch($this->_table, $rg);
+    }
+
+}
