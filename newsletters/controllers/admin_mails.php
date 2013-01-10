@@ -98,6 +98,9 @@ class Admin_mails extends Admin_Controller {
 	
 	function create()
 	{
+        $this->load->model('templates/email_templates_m');
+       $email_templates = $this->email_templates_m->where('is_default',0)->dropdown('id','name');
+       
 		$this->load->library('form_validation');
 		$this->form_validation->set_rules($this->newsletter_rules);
 
@@ -121,12 +124,15 @@ class Admin_mails extends Admin_Controller {
         {
             $rule['field'] = $this->input->post($rule['field']);
         }
-		$this->template->append_metadata($this->load->view('fragments/wysiwyg',$this->data,TRUE));		
-		$this->template->build('admin/mail_form', $this->data);
+		$this->template->append_metadata($this->load->view('fragments/wysiwyg',$this->data,TRUE))
+            ->set('templates', $email_templates)
+            ->build('admin/mail_form', $this->data);
 	}
 
 	function edit($id=false)
 	{
+        $this->load->model('templates/email_templates_m');
+	    $email_templates = $this->email_templates_m->where('is_default',0)->dropdown('id','name');
 		if($id) $this->data->newsletter=$this->newsletters->get_newsletters(false,$id);
         
         $this->form_validation->set_rules($this->newsletter_rules);
@@ -149,9 +155,9 @@ class Admin_mails extends Admin_Controller {
             }
         }
         
-		
-		$this->template->append_metadata($this->load->view('fragments/wysiwyg',$this->data,TRUE));		
-		$this->template->build('admin/mail_form', $this->data);
+		$this->template->append_metadata($this->load->view('fragments/wysiwyg',$this->data,TRUE))
+            ->set('templates', $email_templates)
+            ->build('admin/mail_form', $this->data);
 	}
 
 	
@@ -161,6 +167,7 @@ class Admin_mails extends Admin_Controller {
 		foreach($this->newsletters->get_newsletters('draft',$id) as $mail)
 		{
 			$this->data->mail_id=$mail->id;
+            $this->data->template_id=$mail->template_id;
 			$this->data->subject=$mail->subject;
 			$this->data->body=$mail->body;
 		}
@@ -172,11 +179,139 @@ class Admin_mails extends Admin_Controller {
 	
 	function send_mail($id,$preview=false)
 	{
-		$preview='preview' ? $preview==true : $preview==false;
-		$this->newsletters->send($id,$preview);
+		$this->load->model('recipient_m');
+        $this->load->model('group_m');
+        $this->load->model('templates/email_templates_m');
+        $template_id = $this->input->post('template_id');
+        
+        $data['slug'] = $this->email_templates_m->get($template_id)->slug;
+        //check if the mail is being previewed by the logged in user
+        if($preview===true)
+        {
+            //get the logged in users email address
+            $this->db->from('users');
+            $this->db->where('id',$this->session->userdata('recipient_id'));
+            $query=$this->db->get();
+            foreach($query->result() as $user)
+            {
+                $email_recipients[$user->email]=$user->first_name.' '.$user->last_name;
+            }
+        }
+        else{
+            if($this->input->post('group'))
+            {
+                foreach($this->input->post('group') as $group_id)
+                {
+                    $groups[$group_id] = $this->recipient_m->get_recipients_groups($group_id);
+                        
+                }
+            }
+            $emails = array();
+            if(isset($groups) && count($groups) > 0){
+                foreach($groups as $group){
+                    foreach($group as $user){
+                        $emails[$user->email] = $user->name;
+                    }
+                }
+            }
+            
+            //get additional recipients from textarea DELETE ME
+            if($this->input->post('additional_recipients'))
+            {
+                //consolidate the entries
+                $recipients=$this->input->post('additional_recipients');
+                $recipients=preg_replace("/\n/","|",$recipients);
+                $recipients=str_replace(',',"|",$recipients);
+                $recipients=preg_replace("/\s+/","|",$recipients);
+                
+                $recipients=explode("|",$recipients);
+                foreach($recipients as $value)
+                {
+                    $value=trim($value);
+                    if(!empty($value))
+                    {
+                        $emails[$value]='';
+                    }
+                }
+            }
+        }
+
+        //by now we should have the users names and emails in an array
+        if(is_array($emails))
+        {
+            //get the mail contents
+            $newsletter = $this->newsletters->get($id);
+            
+            $data['subject'] = $newsletter->subject;
+            $data['body'] = $newsletter->body;
+            
+            $delivery_count = 0;
+            $failure_count = 0;
+            foreach ($emails as $email => $name) {
+                $data['email'] = $email;
+                $data['name'] = $name;
+                 
+                if((bool) $this->_send_email($data)){
+                    $delivery_count ++;
+                }
+                else{
+                    $failure_count ++;
+                }
+            }
+            $message = "";
+            if(($delivery_count > 0) && ($failure_count == 0)){
+                $status = 'success'; 
+                $message = "Email Successfully sent to ".$delivery_count." Recipients.<br />";
+            }
+            elseif(($delivery_count == 0) && ($failure_count > 0)){
+                $status = 'error'; 
+                $message = "Email Sending failed to ".$failure_count." Recipients.";
+            }
+            else{
+                $status = 'notice'; 
+                $message = "Email Sent to ".$delivery_count." recipients and failed to ".$failure_count." recipients.";
+            }
+        
+        }
+
+        if($status!='error' and $preview===false)
+        {
+            //move the message to 'sent items' if the send succeeded
+            $input['date_sent'] = date("Y-m-d H:i:s");
+            $this->newsletters->update($id, $input);
+            
+            //$status_message=$this->email->print_debugger();
+        }
+        
+        //$this->session->set_flashdata($status,$message);
+        $this->session->set_flashdata($status, $message);
+        redirect('admin/newsletters/mails');
 	}
 
 
-function add_users_from_file(){$this->newsletters->add_users_from_file();}
+    function add_users_from_file(){$this->newsletters->add_users_from_file();}
+    
+    /**
+     * Send an email
+     *
+     * @param array $comment The comment data.
+     * @param array $entry The entry data.
+     * @return boolean 
+     */
+    private function _send_email($data)
+    {
+        $this->load->library('email');
+        $this->load->library('user_agent');
+        
+        // Add in some extra details
+        $content['slug'] = $data['slug'];
+        $content['name'] = ($data['name'] != '') ? $data['name'] : $data['email'];
+        $content['to'] = $data['email'];
+        $content['subject'] = $data['subject'];
+        $content['body'] = $data['body'];
+           
+        //trigger the event
+        return (bool) Events::trigger('email', $content);
+    }
 
 }

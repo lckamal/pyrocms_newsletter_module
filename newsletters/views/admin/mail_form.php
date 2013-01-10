@@ -1,5 +1,5 @@
 <?php
-$fields=array('subject','body','id');
+$fields=array('subject','body','template_id','id');
 foreach($fields as $field)
 {
 	if(set_value($field))
@@ -28,10 +28,10 @@ foreach($fields as $field)
 					<div class="input"><?php echo form_input('subject', set_value('subject', isset($subject) ? $subject : ''), 'class="width-30"'); ?></div>
 				</li>
 				
-				<!-- <li class="<?php echo alternator('', 'even'); ?>">
+				<li class="<?php echo alternator('', 'even'); ?>">
 				    <label for="template">Template:</label>
-				    <div class="input"><?=form_dropdown('template',array(1,2,3))?></div>
-				</li> -->
+				    <div class="input"><?=form_dropdown('template_id',$templates,$template_id)?><?php echo anchor(site_url('admin/templates/create'), 'Add Template','class="button"')?></div>
+				</li>
 				
 				<li class="<?php echo alternator('', 'even'); ?> full_width_input">
                     <label for="body">Message:</label>

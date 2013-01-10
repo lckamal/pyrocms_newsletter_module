@@ -46,6 +46,15 @@ class Recipient_m extends MY_Model {
         }
     }
     
+    public function get_recipients_groups($group_id){
+        $groups = $this->select('newsletter_recipients.email,newsletter_recipients.name')
+            //->from('newsletter_recipients r')
+            ->join('newsletter_recipients_groups g','g.recipient_id = newsletter_recipients.id')
+            ->where('g.group_id',$group_id)
+            ->get_all();
+            
+            return $groups;
+    }
     /**
      * Inserts recipients to groups
      * 

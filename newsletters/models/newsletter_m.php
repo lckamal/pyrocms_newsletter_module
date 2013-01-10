@@ -263,28 +263,14 @@ class Newsletter_m extends MY_Model {
 	}
 
 
-	function edit_group($id=false)
+	function send_mail($id,$preview=false)
 	{
-		if($id)
-		{
-			$this->db->where('id',$id)->limit(1);
-			$action='update';
-		}
-		else
-		{
-			$action='insert';
-		}
-		$data=array(
-			'group_name'=>$this->input->post('group_name'),
-			'group_public'=>$this->input->post('group_public'),
-			'group_description'=>$this->input->post('group_description')
-		);
-		return $this->db->$action(self::GROUPS,$data) ? true:false;
-	}
-
-
-	function send($id,$preview=false)
-	{
+        $this->load->model('recipient_m');
+        $this->load->model('group_m');
+        $this->load->model('templates/email_templates_m');
+        $template_id = $this->input->post('template_id');
+        
+        $data['slug'] = $this->email_templates_m->get($template_id)->slug;
 		//check if the mail is being previewed by the logged in user
 		if($preview===true)
 		{
@@ -297,157 +283,89 @@ class Newsletter_m extends MY_Model {
 				$email_recipients[$user->email]=$user->first_name.' '.$user->last_name;
 			}
 		}
-		
-		//get mass email recipients
-		elseif($preview===false)
-		{
-			//get the posted groups
-			if($this->input->post('group'))
-			{
-				foreach($this->input->post('group') as $group_id)
-				{
-					//get the users from the posted group
-					$this->db->select('email,name');
-					$this->db->from(self::USERS);
-					$this->db->join(self::USERS_GROUPS,self::USERS_GROUPS.'.recipient_id = '.self::USERS.'.id');
-					$this->db->where('group_id',$group_id);
-					$query=$this->db->get();
-					
-					//add them to the array
-					foreach($query->result() as $row)
-					{
-						$email_recipients[$row->email]=$row->name;
-					}
-				}
-			}
-			//get additional recipients from textarea DELETE ME
-			if($this->input->post('additional_recipients'))
-			{
-				//consolidate the entries
-				$recipients=$this->input->post('additional_recipients');
-				$recipients=preg_replace("/\n/","|",$recipients);
-				$recipients=str_replace(',',"|",$recipients);
-				$recipients=preg_replace("/\s+/","|",$recipients);
-				
-				$recipients=explode("|",$recipients);
-				foreach($recipients as $value)
-				{
-					$value=trim($value);
-					if(!empty($value))
-					{
-						$email_recipients[$value]='';
-					}
-				}
-			}
-		}//end non-preview email gathering
-		var_dump($email_recipients);exit;
+        else{
+            if($this->input->post('group'))
+            {
+                foreach($this->input->post('group') as $group_id)
+                {
+                    $groups[$group_id] = $this->recipient_m->select(self::USERS.'.email,'.self::USERS.'.name')
+                        //->from('newsletter_recipients r')
+                        ->join(self::USERS_GROUPS. ' g','g.recipient_id = '.self::USERS.'.id')
+                        ->where('g.group_id',$group_id)
+                        ->get_all();
+                        
+                        
+                }
+            }
+            $emails = array();
+            if(isset($groups) && count($groups) > 0){
+                foreach($groups as $group){
+                    foreach($group as $user){
+                        $emails[$user->email] = $user->name;
+                    }
+                }
+            }
+            
+            //get additional recipients from textarea DELETE ME
+            if($this->input->post('additional_recipients'))
+            {
+                //consolidate the entries
+                $recipients=$this->input->post('additional_recipients');
+                $recipients=preg_replace("/\n/","|",$recipients);
+                $recipients=str_replace(',',"|",$recipients);
+                $recipients=preg_replace("/\s+/","|",$recipients);
+                
+                $recipients=explode("|",$recipients);
+                foreach($recipients as $value)
+                {
+                    $value=trim($value);
+                    if(!empty($value))
+                    {
+                        $emails[$value]='';
+                    }
+                }
+            }
+        }
+
 		//by now we should have the users names and emails in an array
-		if(is_array($email_recipients))
+		if(is_array($emails))
 		{
 			//get the mail contents
-			foreach($this->get_newsletters('draft',$id) as $row):
-				$subject=$row->subject;
-				$message=$row->body;
-			endforeach;
-			
-			//make sure we got a result
-			////////////////////////////////////////////////////////////////////////////////////////
-			if(isset($subject) and isset($message))
-			{
-			
-				//$email_header=$this->load->view('newsletters/templates/mail/header.txt','',true);
-				//$email_footer=$this->load->view('newsletters/templates/mail/footer.txt','',true);
-				$email_header='HEADER';
-				$email_footer='FOOTER';
-			
-				//load the email class
-				$this->load->library('email');
-				$config['validate']=false;
-				$config['mailtype']='html';
-				$this->email->initialize($config);
-			
-				//initialize some variables
-				$delivery_error_count=0;
-				$delivery_error_email=array();
-				$delivery_success_count=0;
-				$delivery_success_email=array();
-				$status_message='';
+			$newsletter = $this->get($id);
+            
+            $data['subject'] = $newsletter->subject;
+            $data['body'] = $newsletter->body;
+            
+            $delivery_count = 0;
+            $failure_count = 0;
+            foreach ($emails as $email => $name) {
+                $data['email'] = $email;
+                $data['name'] = $name;
+                 
+                if((bool) $this->_send_email($data)){
+                    $delivery_count ++;
+                }
+                else{
+                    $failure_count ++;
+                }
+            }
+            $message = "";
+            if(($delivery_count > 0) && ($failure_count == 0)){
+                $status = 'success'; 
+                $message = "Email Successfully sent to ".$delivery_count." Recipients.<br />";
+            }
+            elseif(($delivery_count == 0) && ($failure_count > 0)){
+                $status = 'error'; 
+                $message = "Email Sending failed to ".$failure_count." Recipients.";
+            }
+            else{
+                $status = 'notice'; 
+                $message = "Email Sent to ".$delivery_count." recipients and failed to ".$failure_count." recipients.";
+            }
+        
+        }
 
-				foreach($email_recipients as $email => $name)
-				{
-					$this->email->clear();
-					$this->email->from('server@localhost','The Server');
-					$this->email->to($email,$name);
-					$this->email->subject($subject);
-					$this->email->message($email_header.$message.$email_footer);
-					
-					//send the mail
-					if(!$this->email->send())
-					{
-						$delivery_error_count+=1;
-						$delivery_error_email[]=$email;
-					}
-					else
-					{
-						$delivery_success_count+=1;
-						$delivery_success_email[]=$email;
-					}
-				}
-				die(print_r($delivery_success_email).print_r($delivery_error_email));
-				
-				if($delivery_success_count > 0)
-				{
-					$status='success';
-					$status_message.='<div class="success message">';
-					$status_message.='<p>Message sent to '.$delivery_success_count.' users.</p>';
-					$status_message.='<ol>';
-					foreach($delivery_success_email as $sent_email)
-					{
-						$status_message.="\n<li>$sent_email</li>";
-					}
-					$status_message.='</ol>';
-					$status_message.='</div>';
-				}
-				else
-				{
-					$status='error';
-					$status_message.='No valid recipients or server error';
-				}
-				
-				//
-				if($delivery_error_count > 0)
-				{
-					$status_message.='<p>Message failed for '.$delivery_error_count.' users.</p>';
-					$status_message.='<ol>';
-					foreach($delivery_error_email as $failed_email)
-					{
-						$status_message.="\n<li><strong>Failed:</strong> $failed_email</li>";
-					}
-					$status_message.='</ol>';
-				}
-			}
-			else//if no message contents
-			{
-				$status='error';
-				$status_message='Could not retrieve message contents!';
-			}
-		}
-		////////////////////////////////////////////////////////////////////////////////////////
-		else//if no $email_recipients array
-		{
-			$status='error';
-			$status_message='No valid recipients!';
-		}
-
-		/////////////////////////////////////
-		//if all failed...
-		if(!isset($status))
-		{
-			$status='error';
-			$status_message='Unexpected error, please contact the adminstrator!';
-		}
-		//if nothing failed
-		elseif($status!='error' and $preview===false)
+		if($status!='error' and $preview===false)
 		{
 			//move the message to 'sent items' if the send succeeded
 			$data['date_sent']=date("Y-m-d H:i:s");
@@ -456,9 +374,10 @@ class Newsletter_m extends MY_Model {
 			
 			$status_message=$this->email->print_debugger();
 		}
-		
+		echo $status;exit;
 		//redirect with message
-		$this->session->set_flashdata($status,$status_message);
+		$this->session->set_flashdata($status,$message);
+        
 		$status==='error' ? redirect('/admin/newsletters/') : redirect('/admin/newsletters');
 	}
 
@@ -501,32 +420,7 @@ class Newsletter_m extends MY_Model {
 		$data['group_id']=$this->input->post('group');
 		$data['modified']=date("Y-m-d H:i:s");
 		
-		
-		
-		/*
-		//attempt to get headers
-		$headers=explode(',',$lines[0]);
-		
-		
-		foreach($headers as $key => $value)
-		{
-			//Given Name Yomi - wtf? google crap
-			//if($key=3)die($value);
-			if(strtolower(preg_replace("/[^A-Za-z]/",'',$value))=='email')die($value);
-
-
-		}
-		//FAIL
-		
-		
-		$this->load->library('csv');
-		$content=$this->csv->parse_file($file);
-		
-		foreach($content as $content)
-		foreach($content as $content)
-			echo($content);
-*/
-
+	
 		
 		//add the data
 		foreach($lines as $key => $value):
@@ -555,58 +449,9 @@ class Newsletter_m extends MY_Model {
 			$this->session->set_flashdata('success','<ul><li>'.$success_count.' users added!</li>'.$success_message.'</ul>');
 		if($error_message!='')
 			$this->session->set_flashdata('notice','<ul><li>'.$error_count.' users failed!</li>'.$error_message.'</ul>');
-	
 
-		/*message($message,$status);
-		echo '<html>
-		<head>
-		<link rel="stylesheet" type="text/css" media="screen,projection" href="http://cbuao.com/admin/public/css/screen.php" />
-		</head>
-		<body>';
-		echo "<h3>$status</h3>";
-		echo $message."</div>";
-		echo '<a href="/admin/newsletters">Continue</a>';
-		echo "</body></html>";*/
 		redirect('admin/newsletters');
 	}
-
-####################################################################################################
-/*
-function quick_add_users()
-{
-		$error_message='';
-		$success_message='';
-		$error_count=0;
-		$success_count=0;
-		$data['group_id']=$this->input->post('group_id');
-		$data['modified']=now();
-$emails=$this->input->post('email');
-
-
-$emails=preg_split("/[\n\s,]+/",$emails);
-
-
-		foreach($emails as $email):
-			$_POST['email']=$email;
-			if($this->edit_recipient()):
-				//$data['email']=trim(strtolower($email));
-				//$this->db->limit(1);
-				//if($this->db->insert('email_recipients',$data)):
-				
-					$success_count+=1;
-					$success_message.='<li>Email: '.$email.'</li>';
-				//endif;
-			else:
-				$error_count+=1;
-				$error_message.='<li><strong>Invalid email:</strong>: <em>'.$email.'</em></li>';
-			endif;
-		endforeach;
-		$success_message!='' ? $message.='<ul class="success message"><li>'.$success_count.' users added!</li>'.$success_message.'</ul>' : null;
-		$error_message!='' ? $message.='<ul class="notice message"><li>'.$error_count.' users failed!</li>'.$error_message.'</ul>' : null;
-
-		message($message,false);
-		redirect('newsletters/add_recipient');
-}
-####################################################################################################
-*/
+    
+    
 }

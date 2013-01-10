@@ -101,6 +101,10 @@ class Module_Newsletters extends Module {
                 'default' => 1,
                 
             ),
+            'template_id' => array(
+                'type' => 'INT',
+                'constraint' => 5,
+            ),
             'date_sent' => array(
                 'type' => 'DATETIME',
                 'null' => TRUE,
