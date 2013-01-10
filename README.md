@@ -14,7 +14,6 @@ Newsletter Module for Pyrocms 2.2
 - Add custom recipients manually on sending Emails
 - Send Mails to multiple groups at a time while merging same emails from multiple groups
 - Notification on successful mail delivery with counts of success email and failure
+- Widget ready subscribe form
 
-TODO:
-	front end polishing. 
 	
